@@ -1,8 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { jsPDF } from "jspdf";
 import "./styles.css";
 
 const KEY = "sorteo-100-state-v2";
+const THEME_KEY = "sorteo-100-theme";
+const AUTH_KEY = "sorteo-100-authenticated";
+const RAFFLE_NUMBER_KEY = "sorteo-100-raffle-number";
 
 function freshState() {
   return {
@@ -20,8 +24,72 @@ function loadState() {
   return freshState();
 }
 
-function App() {
+function loadTheme() {
+  return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark";
+}
+
+function loadAuthentication() {
+  return localStorage.getItem(AUTH_KEY) === "true";
+}
+
+function loadRaffleNumber() {
+  const saved = Number.parseInt(localStorage.getItem(RAFFLE_NUMBER_KEY), 10);
+  return Number.isInteger(saved) && saved > 0 ? saved : 1;
+}
+
+function LandingPage({ theme, onToggleTheme, onLogin }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const submitLogin = event => {
+    event.preventDefault();
+    if (username === "admin" && password === "admin123") {
+      localStorage.setItem(AUTH_KEY, "true");
+      onLogin();
+      return;
+    }
+    setError("Usuario o clave incorrectos.");
+  };
+
+  return (
+    <main className="landing-shell">
+      <div className="ambient ambient-a" />
+      <div className="ambient ambient-b" />
+      <button
+        className="landing-theme-btn"
+        onClick={onToggleTheme}
+        aria-label={theme === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+        title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
+      >
+        {theme === "dark" ? "☀" : "☾"}
+      </button>
+
+      <section className="landing-content">
+     
+        <form className="login-card" onSubmit={submitLogin}>
+          <div className="login-card-heading">
+            <span className="login-icon">→</span>
+            <div><p>ÁREA PRIVADA</p><h2>Iniciar sesión</h2></div>
+          </div>
+          <p className="login-help">Ingresa tus datos para abrir el panel de sorteo.</p>
+          <label htmlFor="username">Usuario</label>
+          <input id="username" value={username} onChange={event => { setUsername(event.target.value); setError(""); }} autoComplete="username" placeholder="Escribe tu usuario" />
+          <label htmlFor="password">Clave</label>
+          <input id="password" type="password" value={password} onChange={event => { setPassword(event.target.value); setError(""); }} autoComplete="current-password" placeholder="Escribe tu clave" />
+          {error && <p className="login-error" role="alert">{error}</p>}
+          <button className="login-btn" type="submit">Entrar al sorteo <span>↗</span></button>
+          <p className="login-note">Acceso protegido para administradores</p>
+        </form>
+      </section>
+      <footer>✨ Sorteo 100 · Plataforma de sorteos sin repetición</footer>
+    </main>
+  );
+}
+
+function DrawApp({ theme, onToggleTheme, onLogout }) {
   const [state, setState] = useState(loadState);
+  const [raffleNumber, setRaffleNumber] = useState(loadRaffleNumber);
   const [rolling, setRolling] = useState(false);
   const [display, setDisplay] = useState(state.current);
   const [finished, setFinished] = useState(state.available.length === 0);
@@ -31,6 +99,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(KEY, JSON.stringify(state));
   }, [state]);
+
+  useEffect(() => {
+    localStorage.setItem(RAFFLE_NUMBER_KEY, String(raffleNumber));
+  }, [raffleNumber]);
 
   const progress = useMemo(() => state.drawn.length, [state.drawn.length]);
 
@@ -82,10 +154,74 @@ function App() {
     }, 70);
   };
 
+  const undoLast = () => {
+    if (rolling || state.drawn.length === 0) return;
+
+    const previousNumber = state.drawn.length > 1 ? state.drawn[state.drawn.length - 2] : null;
+    const lastNumber = state.drawn[state.drawn.length - 1];
+
+    setState(prev => ({
+      available: [...prev.available, lastNumber].sort((a, b) => a - b),
+      drawn: prev.drawn.slice(0, -1),
+      current: previousNumber
+    }));
+    setDisplay(previousNumber);
+    setFinished(false);
+    setReveal(false);
+  };
+
+  const downloadPdf = () => {
+    const pdf = new jsPDF();
+    const date = new Date().toLocaleDateString("es-ES");
+
+    pdf.setFillColor(35, 42, 82);
+    pdf.rect(0, 0, 210, 42, "F");
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFontSize(24);
+    pdf.setFont("helvetica", "bold");
+    pdf.text("SORTEO 100", 20, 20);
+    pdf.setFontSize(12);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(`Numero de sorteo: ${raffleNumber}`, 20, 30);
+    pdf.text(`Fecha: ${date}`, 135, 30);
+
+    pdf.setTextColor(45, 53, 80);
+    pdf.setFontSize(14);
+    pdf.setFont("helvetica", "bold");
+    pdf.text(`Numeros sorteados (${state.drawn.length}/100)`, 20, 58);
+
+    state.drawn.forEach((number, index) => {
+      const column = index % 10;
+      const row = Math.floor(index / 10);
+      const x = 20 + column * 18;
+      const y = 70 + row * 14;
+      pdf.setFillColor(221, 232, 255);
+      pdf.setDrawColor(157, 185, 237);
+      pdf.roundedRect(x, y - 8, 14, 10, 2, 2, "FD");
+      pdf.setTextColor(66, 97, 165);
+      pdf.setFontSize(11);
+      pdf.text(String(number).padStart(2, "0"), x + 7, y - 1, { align: "center" });
+    });
+
+    if (state.drawn.length === 0) {
+      pdf.setTextColor(105, 112, 135);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(12);
+      pdf.text("Todavia no hay numeros sorteados.", 20, 74);
+    }
+
+    pdf.setTextColor(105, 112, 135);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9);
+    pdf.text("Sorteo 100 - Sin repeticion", 20, 285);
+    pdf.save(`sorteo-${raffleNumber}.pdf`);
+  };
+
   const reset = () => {
     if (window.confirm("¿Comenzar un nuevo sorteo? Se perderá el historial actual.")) {
       const next = freshState();
       setState(next);
+      setRaffleNumber(current => current + 1);
       setDisplay(null);
       setFinished(false);
       setReveal(false);
@@ -106,9 +242,20 @@ function App() {
             <h1>SORTEO <span>100</span></h1>
             <p>{projection ? "MODO PROYECCIÓN · TV / PROYECTOR" : "Sorteador aleatorio sin repetición"}</p>
           </div>
+          <span className="raffle-badge">Sorteo #{raffleNumber}</span>
         </div>
         <div className="header-actions">
+          <button
+            className="theme-btn"
+            onClick={onToggleTheme}
+            aria-label={theme === "dark" ? "Activar modo claro" : "Activar modo oscuro"}
+            title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
+          >
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
           {!projection && <button className="reset-btn" onClick={reset}>↻ Nuevo sorteo</button>}
+          {!projection && <button className="logout-btn" onClick={onLogout}>↪ Salir</button>}
+          <button className="pdf-btn" onClick={downloadPdf} title="Descargar PDF">⇩ PDF</button>
           <button className="fullscreen-btn" onClick={toggleProjection}>
             {projection ? "⛶ Salir de pantalla completa" : "⛶ Pantalla completa"}
           </button>
@@ -135,6 +282,9 @@ function App() {
           </div>
           <button className="draw-btn" onClick={draw} disabled={rolling || finished}>
             <span>🎲</span> {finished ? "SORTEO COMPLETO" : rolling ? "SORTEANDO..." : "SORTEAR NÚMERO"}
+          </button>
+          <button className="undo-btn" onClick={undoLast} disabled={rolling || state.drawn.length === 0}>
+            ↶ Deshacer último número
           </button>
           <p className="safe-note">✓ Sin repetición · Guardado automático</p>
         </aside>
@@ -180,6 +330,7 @@ function App() {
             <div className="finish-icon">🎉</div>
             <h2>¡SORTEO COMPLETADO!</h2>
             <p>Los 100 números fueron sorteados sin repetición.</p>
+            <button className="undo-btn" onClick={undoLast}>↶ DESHACER ÚLTIMO NÚMERO</button>
             {!projection && <button className="draw-btn" onClick={reset}>↻ NUEVO SORTEO</button>}
           </div>
         </div>
@@ -188,6 +339,28 @@ function App() {
       <footer>✨ Sorteo 100 · {projection ? "Modo Proyección" : "Modo Control"} · Sin repetición · Persistencia local</footer>
     </main>
   );
+}
+
+function App() {
+  const [authenticated, setAuthenticated] = useState(loadAuthentication);
+  const [theme, setTheme] = useState(loadTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(current => current === "dark" ? "light" : "dark");
+  const logout = () => {
+    localStorage.removeItem(AUTH_KEY);
+    setAuthenticated(false);
+  };
+
+  if (!authenticated) {
+    return <LandingPage theme={theme} onToggleTheme={toggleTheme} onLogin={() => setAuthenticated(true)} />;
+  }
+
+  return <DrawApp theme={theme} onToggleTheme={toggleTheme} onLogout={logout} />;
 }
 
 createRoot(document.getElementById("root")).render(<App />);
