@@ -37,6 +37,40 @@ function loadRaffleNumber() {
   return Number.isInteger(saved) && saved > 0 ? saved : 1;
 }
 
+function numberToWords(number) {
+  const units = ["cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"];
+  const teens = ["diez", "once", "doce", "trece", "catorce", "quince", "dieciseis", "diecisiete", "dieciocho", "diecinueve"];
+  const tens = ["", "", "veinte", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"];
+
+  if (number < 10) return units[number];
+  if (number < 20) return teens[number - 10];
+  if (number === 100) return "cien";
+  if (number === 20) return "veinte";
+
+  const ten = Math.floor(number / 10);
+  const unit = number % 10;
+  return unit === 0 ? tens[ten] : `${tens[ten]} y ${units[unit]}`;
+}
+
+function announceNumber(number) {
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+
+  const speech = window.speechSynthesis;
+  speech.cancel();
+  speech.resume();
+
+  const announcement = new window.SpeechSynthesisUtterance(`Número ${numberToWords(number)}`);
+  const voices = speech.getVoices();
+  const preferredVoice = voices.find(voice => ["es-419", "es-MX", "es-US", "es-CO", "es-AR", "es-CL", "es-PE"].includes(voice.lang))
+    || voices.find(voice => voice.lang.toLowerCase().startsWith("es-"));
+
+  announcement.lang = preferredVoice?.lang || "es-MX";
+  if (preferredVoice) announcement.voice = preferredVoice;
+  announcement.rate = 0.9;
+  announcement.pitch = 1;
+  speech.speak(announcement);
+}
+
 function LandingPage({ theme, onToggleTheme, onLogin }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -72,17 +106,17 @@ function LandingPage({ theme, onToggleTheme, onLogin }) {
             <span className="login-icon">→</span>
             <div><p>ÁREA PRIVADA</p><h2>Iniciar sesión</h2></div>
           </div>
-          <p className="login-help">Ingresa tus datos para abrir el panel de sorteo.</p>
+          <p className="login-help">Ingresa tus datos para abrir el panel de bingo.</p>
           <label htmlFor="username">Usuario</label>
           <input id="username" value={username} onChange={event => { setUsername(event.target.value); setError(""); }} autoComplete="username" placeholder="Escribe tu usuario" />
           <label htmlFor="password">Clave</label>
           <input id="password" type="password" value={password} onChange={event => { setPassword(event.target.value); setError(""); }} autoComplete="current-password" placeholder="Escribe tu clave" />
           {error && <p className="login-error" role="alert">{error}</p>}
-          <button className="login-btn" type="submit">Entrar al sorteo <span>↗</span></button>
+          <button className="login-btn" type="submit">Entrar al bingo <span>↗</span></button>
           <p className="login-note">Acceso protegido para administradores</p>
         </form>
       </section>
-      <footer>✨ Sorteo 100 · Plataforma de sorteos sin repetición</footer>
+      <footer>✨ Bingo 100 · Juego de números sin repetición</footer>
     </main>
   );
 }
@@ -103,6 +137,19 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
   useEffect(() => {
     localStorage.setItem(RAFFLE_NUMBER_KEY, String(raffleNumber));
   }, [raffleNumber]);
+
+  useEffect(() => () => {
+    window.speechSynthesis?.cancel();
+  }, []);
+
+  useEffect(() => {
+    const speech = window.speechSynthesis;
+    if (!speech) return undefined;
+    speech.getVoices();
+    const loadVoices = () => speech.getVoices();
+    speech.addEventListener("voiceschanged", loadVoices);
+    return () => speech.removeEventListener("voiceschanged", loadVoices);
+  }, []);
 
   const progress = useMemo(() => state.drawn.length, [state.drawn.length]);
 
@@ -129,6 +176,7 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
   const draw = () => {
     if (rolling || state.available.length === 0) return;
 
+    window.speechSynthesis?.resume();
     setRolling(true);
     setReveal(false);
     const pool = [...state.available];
@@ -147,6 +195,7 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
           drawn: [...prev.drawn, winner],
           current: winner
         }));
+        announceNumber(winner);
         setRolling(false);
         setReveal(true);
         setFinished(pool.length === 1);
@@ -179,16 +228,16 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
     pdf.setTextColor(255, 255, 255);
     pdf.setFontSize(24);
     pdf.setFont("helvetica", "bold");
-    pdf.text("SORTEO 100", 20, 20);
+    pdf.text("BINGO 100", 20, 20);
     pdf.setFontSize(12);
     pdf.setFont("helvetica", "normal");
-    pdf.text(`Numero de sorteo: ${raffleNumber}`, 20, 30);
+    pdf.text(`Numero de bingo: ${raffleNumber}`, 20, 30);
     pdf.text(`Fecha: ${date}`, 135, 30);
 
     pdf.setTextColor(45, 53, 80);
     pdf.setFontSize(14);
     pdf.setFont("helvetica", "bold");
-    pdf.text(`Numeros sorteados (${state.drawn.length}/100)`, 20, 58);
+    pdf.text(`Numeros cantados (${state.drawn.length}/100)`, 20, 58);
 
     state.drawn.forEach((number, index) => {
       const column = index % 10;
@@ -207,18 +256,18 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
       pdf.setTextColor(105, 112, 135);
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(12);
-      pdf.text("Todavia no hay numeros sorteados.", 20, 74);
+      pdf.text("Todavia no hay numeros cantados.", 20, 74);
     }
 
     pdf.setTextColor(105, 112, 135);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(9);
-    pdf.text("Sorteo 100 - Sin repeticion", 20, 285);
-    pdf.save(`sorteo-${raffleNumber}.pdf`);
+    pdf.text("Bingo 100 - Sin repeticion", 20, 285);
+    pdf.save(`bingo-${raffleNumber}.pdf`);
   };
 
   const reset = () => {
-    if (window.confirm("¿Comenzar un nuevo sorteo? Se perderá el historial actual.")) {
+    if (window.confirm("¿Comenzar un nuevo bingo? Se perderá el historial actual.")) {
       const next = freshState();
       setState(next);
       setRaffleNumber(current => current + 1);
@@ -239,10 +288,10 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
         <div className="brand">
           <span className="brand-icon">🎲</span>
           <div>
-            <h1>SORTEO <span>100</span></h1>
-            <p>{projection ? "MODO PROYECCIÓN · TV / PROYECTOR" : "Sorteador aleatorio sin repetición"}</p>
+            <h1>BINGO <span>100</span></h1>
+            <p>{projection ? "MODO PROYECCIÓN · TV / PROYECTOR" : "Bingo de números sin repetición"}</p>
           </div>
-          <span className="raffle-badge">Sorteo #{raffleNumber}</span>
+          <span className="raffle-badge">Bingo #{raffleNumber}</span>
         </div>
         <div className="header-actions">
           <button
@@ -253,7 +302,7 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
           >
             {theme === "dark" ? "☀" : "☾"}
           </button>
-          {!projection && <button className="reset-btn" onClick={reset}>↻ Nuevo sorteo</button>}
+          {!projection && <button className="reset-btn" onClick={reset}>↻ Nuevo bingo</button>}
           {!projection && <button className="logout-btn" onClick={onLogout}>↪ Salir</button>}
           <button className="pdf-btn" onClick={downloadPdf} title="Descargar PDF">⇩ PDF</button>
           <button className="fullscreen-btn" onClick={toggleProjection}>
@@ -264,24 +313,24 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
 
       <section className="hero-grid">
         <div className={"number-card " + (rolling ? "rolling" : "") + (reveal ? "reveal" : "")}>
-          <div className="card-label">{finished ? "SORTEO FINALIZADO" : rolling ? "SORTEANDO..." : "NÚMERO ACTUAL"}</div>
+          <div className="card-label">{finished ? "BINGO FINALIZADO" : rolling ? "SACANDO NÚMERO..." : "NÚMERO ACTUAL"}</div>
           <div className="big-number">{display ?? "—"}</div>
           <div className="number-caption">
-            {finished ? "🎉 ¡LOS 100 NÚMEROS FUERON SORTEADOS!" : rolling ? "Mezclando números..." : "Listo para el próximo número"}
+            {finished ? "🎉 ¡LOS 100 NÚMEROS FUERON CANTADOS!" : rolling ? "Mezclando números..." : "Listo para el próximo número"}
           </div>
           <div className="glow-ring" />
           {reveal && !finished && <div className="sparkles">✦ ✧ ✦</div>}
         </div>
 
         <aside className="stats-card">
-          <div className="stat"><span>Sorteados</span><strong>{state.drawn.length}</strong></div>
+          <div className="stat"><span>Cantados</span><strong>{state.drawn.length}</strong></div>
           <div className="stat"><span>Restantes</span><strong>{state.available.length}</strong></div>
           <div className="progress-wrap">
             <div className="progress-top"><span>Progreso</span><b>{progress}%</b></div>
             <div className="progress"><i style={{width: `${progress}%`}} /></div>
           </div>
           <button className="draw-btn" onClick={draw} disabled={rolling || finished}>
-            <span>🎲</span> {finished ? "SORTEO COMPLETO" : rolling ? "SORTEANDO..." : "SORTEAR NÚMERO"}
+            <span>🎲</span> {finished ? "BINGO COMPLETO" : rolling ? "SACANDO..." : "SACAR NÚMERO"}
           </button>
           <button className="undo-btn" onClick={undoLast} disabled={rolling || state.drawn.length === 0}>
             ↶ Deshacer último número
@@ -292,11 +341,11 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
 
       <section className="panel history-panel">
         <div className="section-heading">
-          <div><h2>Últimos números sorteados</h2><p>El más reciente aparece destacado.</p></div>
+          <div><h2>Últimos números cantados</h2><p>El más reciente aparece destacado.</p></div>
           <span className="counter">{state.drawn.length}/100</span>
         </div>
         {shownHistory.length === 0 ? (
-          <div className="empty">Todavía no hay números sorteados.</div>
+          <div className="empty">Todavía no hay números cantados.</div>
         ) : (
           <div className="history">
             {shownHistory.map((n, i) => <span key={n} className={i === 0 ? "last" : ""}>{String(n).padStart(2, "0")}</span>)}
@@ -307,7 +356,7 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
       {!projection && (
         <section className="panel board-panel">
           <div className="section-heading">
-            <div><h2>Tablero de números</h2><p>Los números ya sorteados quedan bloqueados.</p></div>
+            <div><h2>Tablero de números</h2><p>Los números ya cantados quedan bloqueados.</p></div>
             <span className="counter">{state.drawn.length}/100</span>
           </div>
           <div className="number-grid">
@@ -328,15 +377,15 @@ function DrawApp({ theme, onToggleTheme, onLogout }) {
         <div className="finish-overlay" aria-live="polite">
           <div className="finish-card">
             <div className="finish-icon">🎉</div>
-            <h2>¡SORTEO COMPLETADO!</h2>
-            <p>Los 100 números fueron sorteados sin repetición.</p>
+            <h2>¡BINGO COMPLETADO!</h2>
+            <p>Los 100 números fueron cantados sin repetición.</p>
             <button className="undo-btn" onClick={undoLast}>↶ DESHACER ÚLTIMO NÚMERO</button>
-            {!projection && <button className="draw-btn" onClick={reset}>↻ NUEVO SORTEO</button>}
+            {!projection && <button className="draw-btn" onClick={reset}>↻ NUEVO BINGO</button>}
           </div>
         </div>
       )}
 
-      <footer>✨ Sorteo 100 · {projection ? "Modo Proyección" : "Modo Control"} · Sin repetición · Persistencia local</footer>
+      <footer>✨ Bingo 100 · {projection ? "Modo Proyección" : "Modo Control"} · Sin repetición · Persistencia local</footer>
     </main>
   );
 }
